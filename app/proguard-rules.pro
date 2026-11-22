@@ -1,0 +1,3 @@
+-keep class com.anistream.data.** { *; }
+-dontwarn okhttp3.**
+-dontwarn org.jsoup.**

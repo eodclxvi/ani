@@ -31,11 +31,10 @@ class SearchViewModel(app: Application) : AndroidViewModel(app) {
     private val _error = MutableStateFlow<String?>(null)
     val error = _error.asStateFlow()
 
+    // Straight from the stores, so the first frame already has the saved lists (no empty flash).
     val watchHistory = watchStore.getAll()
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val favorites = favStore.getAll()
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     fun updateQuery(q: String) {
         _query.value = q

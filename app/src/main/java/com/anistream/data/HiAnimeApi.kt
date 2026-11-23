@@ -143,6 +143,7 @@ object HiAnimeApi {
             subtitleUrl = subtitleUrl,
             referer = referer,
             qualities = qualities,
+            masterUrl = m3u8Master,
         )
     }
 

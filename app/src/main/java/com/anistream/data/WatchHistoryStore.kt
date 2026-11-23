@@ -4,6 +4,7 @@ import android.content.Context
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.encodeToString
@@ -13,13 +14,16 @@ import java.io.File
 class WatchHistoryStore(context: Context) {
     private val file = File(context.filesDir, "watch_history.json")
     private val json = Json { ignoreUnknownKeys = true; prettyPrint = true }
-    private val _entries = MutableStateFlow<List<WatchHistoryEntry>>(emptyList())
+    // One list per process: every screen's ViewModel makes its own store, and they must all see the same
+    // entries (otherwise Home keeps showing what was there before you watched something).
+    private val _entries: MutableStateFlow<List<WatchHistoryEntry>> =
+        synchronized(Companion) { shared ?: MutableStateFlow(load()).also { shared = it } }
 
-    init {
-        _entries.value = load()
+    private companion object {
+        @Volatile var shared: MutableStateFlow<List<WatchHistoryEntry>>? = null
     }
 
-    fun getAll(): Flow<List<WatchHistoryEntry>> = _entries.asStateFlow()
+    fun getAll(): StateFlow<List<WatchHistoryEntry>> = _entries.asStateFlow()
 
     suspend fun getByAnimeId(animeId: String): WatchHistoryEntry? =
         _entries.value.find { it.animeId == animeId }

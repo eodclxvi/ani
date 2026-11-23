@@ -14,7 +14,6 @@ class HistoryViewModel(app: Application) : AndroidViewModel(app) {
     private val store = WatchHistoryStore(app)
 
     val history: StateFlow<List<WatchHistoryEntry>> = store.getAll()
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     fun delete(animeId: String) {
         viewModelScope.launch { store.delete(animeId) }

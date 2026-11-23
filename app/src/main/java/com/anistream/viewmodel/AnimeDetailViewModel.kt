@@ -38,6 +38,13 @@ class AnimeDetailViewModel(app: Application) : AndroidViewModel(app) {
     private val _watchHistory = MutableStateFlow<WatchHistoryEntry?>(null)
     val watchHistory = _watchHistory.asStateFlow()
 
+    private val _currentEpisode = MutableStateFlow<Episode?>(null)
+    /** The episode being played (or loading), for next/previous in the player. */
+    val currentEpisode = _currentEpisode.asStateFlow()
+
+    /** Where the player should start the stream that is loading; it reads this once and resets it to 0. */
+    var resumePositionMs: Long = 0L
+
     private val _isDub = MutableStateFlow(false)
     val isDub = _isDub.asStateFlow()
 
@@ -78,8 +85,15 @@ class AnimeDetailViewModel(app: Application) : AndroidViewModel(app) {
         _isDub.value = !_isDub.value
     }
 
-    fun playEpisode(episode: Episode, mode: String = if (_isDub.value) "dub" else "sub") {
+    fun playEpisode(
+        episode: Episode,
+        mode: String = if (_isDub.value) "dub" else "sub",
+        resumeMs: Long = 0L,
+    ) {
+        _currentEpisode.value = episode
+        resumePositionMs = resumeMs
         viewModelScope.launch {
+            val previous = store.getByAnimeId(currentAnimeId)
             _streamLoading.value = true
             _streamInfo.value = null
             _error.value = null
@@ -93,6 +107,8 @@ class AnimeDetailViewModel(app: Application) : AndroidViewModel(app) {
                         posterUrl = currentPosterUrl,
                         lastEpisode = episode.number,
                         lastEpisodeDataId = episode.dataId,
+                        positionMs = resumeMs,
+                        durationMs = if (previous?.lastEpisodeDataId == episode.dataId) previous.durationMs else 0L,
                     )
                 )
                 _watchHistory.value = store.getByAnimeId(currentAnimeId)
@@ -108,6 +124,7 @@ class AnimeDetailViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             val existing = store.getByAnimeId(currentAnimeId) ?: return@launch
             store.upsert(existing.copy(positionMs = positionMs, durationMs = durationMs, updatedAt = System.currentTimeMillis()))
+            _watchHistory.value = store.getByAnimeId(currentAnimeId)
         }
     }
 

@@ -19,6 +19,8 @@ data class StreamInfo(
     val subtitleUrl: String?,
     val referer: String,
     val qualities: List<Quality>,
+    /** The master playlist: lets the player pick quality itself and find separate audio/subtitle renditions. */
+    val masterUrl: String = "",
 )
 
 data class Quality(

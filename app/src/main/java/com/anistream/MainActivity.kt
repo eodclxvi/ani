@@ -30,12 +30,19 @@ import com.anistream.ui.navigation.Routes
 import com.anistream.ui.theme.AniStreamTheme
 import com.anistream.ui.theme.ThemeMode
 import com.anistream.ui.theme.ThemePreference
+import com.anistream.tv.isTelevision
 
 class MainActivity : ComponentActivity() {
 
     @OptIn(ExperimentalMaterial3Api::class)
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // On a TV (e.g. opened from Settings > Apps), use the remote-friendly app instead.
+        if (isTelevision()) {
+            startActivity(android.content.Intent(this, com.anistream.tv.TvActivity::class.java))
+            finish()
+            return
+        }
         ThemePreference.load(this)
         enableEdgeToEdge()
 

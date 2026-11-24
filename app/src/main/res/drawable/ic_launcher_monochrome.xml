@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Ani's themed-icon shape: a skull and crossbones (from the pirate hat) as one flat silhouette.
+     Only the shape matters: the launcher paints it in the icon theme's colour. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- the two bones -->
+    <path
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="4.5"
+        android:strokeLineCap="round"
+        android:pathData="M38,60 L70,76 M70,60 L38,76" />
+    <!-- the round knobs at each bone end -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M36.9,59.1 a3,3 0 1,1 -0.01,0 Z M39.1,54.9 a3,3 0 1,1 -0.01,0 Z M68.9,75.1 a3,3 0 1,1 -0.01,0 Z M71.1,70.9 a3,3 0 1,1 -0.01,0 Z M71.1,59.1 a3,3 0 1,1 -0.01,0 Z M68.9,54.9 a3,3 0 1,1 -0.01,0 Z M39.1,75.1 a3,3 0 1,1 -0.01,0 Z M36.9,70.9 a3,3 0 1,1 -0.01,0 Z" />
+    <!-- the skull: head, jaw, then the eyes, nose and teeth cut out -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M54,27 A15,15 0 1,1 53.99,27 Z M47,50 H61 V62 H47 Z M48,37.5 A4.5,4.5 0 1,0 48.01,37.5 Z M60,37.5 A4.5,4.5 0 1,0 60.01,37.5 Z M54,48.5 L52,53 H56 Z M51.3,58 V62.5 H52.7 V58 Z M55.3,58 V62.5 H56.7 V58 Z" />
+</vector>

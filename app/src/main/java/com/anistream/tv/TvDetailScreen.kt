@@ -52,6 +52,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
+import androidx.compose.material.icons.filled.SkipNext
+import com.anistream.data.PlaybackPrefs
+import androidx.compose.ui.platform.LocalContext
 import com.anistream.data.Episode
 import com.anistream.data.WatchHistoryEntry
 import com.anistream.viewmodel.AnimeDetailViewModel
@@ -206,6 +209,13 @@ fun TvDetailScreen(
                                 }
                                 TvButton("Sub", onClick = { if (isDub) vm.toggleDub() }, selected = !isDub)
                                 TvButton("Dub", onClick = { if (!isDub) vm.toggleDub() }, selected = isDub)
+                                val context = LocalContext.current
+                                TvButton(
+                                    if (PlaybackPrefs.autoplayNext) "Autoplay on" else "Autoplay off",
+                                    onClick = { PlaybackPrefs.setAutoplayNext(context, !PlaybackPrefs.autoplayNext) },
+                                    icon = Icons.Default.SkipNext,
+                                    selected = PlaybackPrefs.autoplayNext,
+                                )
                                 TvButton(
                                     if (isFavorite) "Favourited" else "Favourite",
                                     onClick = vm::toggleFavorite,

@@ -42,6 +42,10 @@ import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import com.anistream.cast.CastButton
 import com.anistream.data.Episode
+import com.anistream.data.PlaybackPrefs
+import androidx.compose.material.icons.filled.SkipNext
+import androidx.compose.foundation.layout.size
+import androidx.compose.ui.platform.LocalContext
 import com.anistream.viewmodel.AnimeDetailViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -165,6 +169,13 @@ fun AnimeDetailScreen(
                                 selected = isDub,
                                 onClick = { if (!isDub) viewModel.toggleDub() },
                                 label = { Text("DUB") },
+                            )
+                            val context = LocalContext.current
+                            FilterChip(
+                                selected = PlaybackPrefs.autoplayNext,
+                                onClick = { PlaybackPrefs.setAutoplayNext(context, !PlaybackPrefs.autoplayNext) },
+                                label = { Text("AUTOPLAY") },
+                                leadingIcon = { Icon(Icons.Default.SkipNext, null, Modifier.size(18.dp)) },
                             )
                         }
                     }

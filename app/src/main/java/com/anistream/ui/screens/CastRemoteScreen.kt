@@ -54,6 +54,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import com.anistream.cast.CastController
+import com.anistream.data.PlaybackPrefs
 import com.anistream.data.StreamInfo
 import com.anistream.viewmodel.AnimeDetailViewModel
 import com.google.android.gms.cast.MediaStatus
@@ -125,7 +126,7 @@ fun CastRemoteScreen(
                     MediaStatus.IDLE_REASON_FINISHED -> {
                         finishedHandled = true
                         if (durationMs > 0) viewModel.updatePlaybackPosition(durationMs, durationMs)
-                        next?.let { viewModel.playEpisode(it) }
+                        if (PlaybackPrefs.autoplayNext) next?.let { viewModel.playEpisode(it) }
                     }
                     MediaStatus.IDLE_REASON_ERROR -> {
                         finishedHandled = true

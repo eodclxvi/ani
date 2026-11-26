@@ -74,6 +74,7 @@ fun Context.isTelevision(): Boolean {
 class TvActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        com.anistream.data.PlaybackPrefs.load(this)
         setContent { TvTheme { TvApp() } }
     }
 }

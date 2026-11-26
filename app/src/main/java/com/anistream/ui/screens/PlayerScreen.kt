@@ -34,7 +34,10 @@ import androidx.media3.exoplayer.hls.HlsMediaSource
 import androidx.media3.ui.PlayerView
 import com.anistream.cast.CastButton
 import com.anistream.cast.CastController
+import com.anistream.data.PlaybackPrefs
 import com.anistream.data.StreamInfo
+import androidx.media3.common.Player
+import androidx.compose.runtime.rememberUpdatedState
 import com.anistream.viewmodel.AnimeDetailViewModel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
@@ -113,6 +116,24 @@ private fun LocalPlayer(viewModel: AnimeDetailViewModel, info: StreamInfo, onDis
         }
     }
 
+    // When an episode ends, start the next one (if Autoplay is on).
+    val episodes by viewModel.episodes.collectAsState()
+    val current by viewModel.currentEpisode.collectAsState()
+    val next by rememberUpdatedState(
+        episodes.indexOfFirst { it.dataId == current?.dataId }.takeIf { it >= 0 }?.let { episodes.getOrNull(it + 1) }
+    )
+    DisposableEffect(player) {
+        val listener = object : Player.Listener {
+            override fun onPlaybackStateChanged(state: Int) {
+                if (state == Player.STATE_ENDED && PlaybackPrefs.autoplayNext) {
+                    next?.let { viewModel.playEpisode(it) }
+                }
+            }
+        }
+        player.addListener(listener)
+        onDispose { player.removeListener(listener) }
+    }
+
     LaunchedEffect(player) {
         while (isActive) {
             delay(5000)
@@ -128,7 +149,7 @@ private fun LocalPlayer(viewModel: AnimeDetailViewModel, info: StreamInfo, onDis
                 viewModel.updatePlaybackPosition(player.currentPosition, player.duration)
             }
             // If this player is closing because a TV connected, the TV picks up from here.
-            viewModel.resumePositionMs = player.currentPosition
+            if (CastController.device.value != null) viewModel.resumePositionMs = player.currentPosition
             player.release()
         }
     }

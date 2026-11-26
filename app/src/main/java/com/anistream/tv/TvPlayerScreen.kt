@@ -104,7 +104,7 @@ private fun formatTime(ms: Long): String {
  *  - hidden controls: OK pauses/plays, ◀ ▶ skip 10 s (hold to go faster), ▲ ▼ show controls
  *  - controls shown: ◀ ▶ on the bar skip, ▼ to the buttons (previous, play, next, subtitles), Back hides them
  *  - media keys: play/pause, fast-forward/rewind 30 s, next/previous episode
- * Plays the next episode by itself when one ends.
+ * Plays the next episode by itself when one ends (if Autoplay is on).
  */
 @OptIn(UnstableApi::class)
 @Composable
@@ -198,7 +198,7 @@ fun TvPlayerScreen(vm: AnimeDetailViewModel, onExit: () -> Unit) {
                 if (state == Player.STATE_ENDED) {
                     savePosition()
                     val next = nextEpState
-                    if (next != null) vm.playEpisode(next) else overlay = true
+                    if (next != null && com.anistream.data.PlaybackPrefs.autoplayNext) vm.playEpisode(next) else overlay = true
                 }
             }
             override fun onTracksChanged(tracks: Tracks) {

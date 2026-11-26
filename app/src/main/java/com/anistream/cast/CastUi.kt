@@ -32,6 +32,8 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.launch
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -61,11 +63,15 @@ fun CastButton(tint: Color = LocalContentColor.current) {
     if (open) CastDevicePicker(onDismiss = { open = false })
 }
 
-/** Lists the Chromecasts / Google TVs on the Wi-Fi; tap one to connect. When connected, offers Stop casting. */
+/**
+ * Lists the TVs on the Wi-Fi: Chromecasts / Google TVs, LG webOS TVs and other DLNA TVs. Tap one to connect.
+ * When connected, offers Stop casting.
+ */
 @Composable
 fun CastDevicePicker(onDismiss: () -> Unit) {
     val context = LocalContext.current
     val device by CastController.device.collectAsState()
+    val scope = rememberCoroutineScope()
 
     // Android 17 asks before an app talks to devices on the local network.
     val needsPermission = Build.VERSION.SDK_INT >= 37 &&
@@ -74,7 +80,11 @@ fun CastDevicePicker(onDismiss: () -> Unit) {
     val askPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { permissionAsked = true }
     LaunchedEffect(Unit) { if (needsPermission) askPermission.launch(LOCAL_NETWORK) }
 
-    if (device != null) {
+    var connecting by remember { mutableStateOf<String?>(null) }
+    var lgPrompt by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
+
+    if (device != null && connecting == null) {
         AlertDialog(
             onDismissRequest = onDismiss,
             icon = { Icon(Icons.Default.CastConnected, null) },
@@ -92,7 +102,8 @@ fun CastDevicePicker(onDismiss: () -> Unit) {
             .build()
     }
     var routes by remember { mutableStateOf(emptyList<MediaRouter.RouteInfo>()) }
-    var connecting by remember { mutableStateOf<String?>(null) }
+    var lanTvs by remember { mutableStateOf(emptyList<LanTv>()) }
+    var scanning by remember { mutableStateOf(true) }
 
     if (permissionAsked) {
         DisposableEffect(router) {
@@ -112,9 +123,22 @@ fun CastDevicePicker(onDismiss: () -> Unit) {
             refresh()
             onDispose { router.removeCallback(callback) }
         }
+        // LG and DLNA TVs: ask the network twice, since a TV just switched on can be slow to answer.
+        LaunchedEffect(Unit) {
+            repeat(2) {
+                val found = LanDiscovery.scan(context)
+                lanTvs = (lanTvs + found).distinctBy { it.ip }.sortedBy { it.name.lowercase() }
+            }
+            scanning = false
+        }
     }
-    // Close the picker as soon as the TV connects.
+    // A Chromecast connected: close the picker.
     LaunchedEffect(device) { if (device != null && connecting != null) onDismiss() }
+
+    // Chromecasts often also answer as DLNA TVs; list each TV once, as a Chromecast.
+    @Suppress("DEPRECATION")
+    val castIps = routes.mapNotNull { CastDevice.getFromBundle(it.extras)?.inetAddress?.hostAddress }.toSet()
+    val others = lanTvs.filter { it.ip !in castIps }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -122,34 +146,65 @@ fun CastDevicePicker(onDismiss: () -> Unit) {
         title = { Text("Cast to") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                if (routes.isEmpty()) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
-                        Spacer(Modifier.width(12.dp))
-                        Text("Looking for TVs on this Wi-Fi…")
+                routes.forEach { route ->
+                    DeviceRow(route.name, busy = connecting == route.name, enabled = connecting == null) {
+                        connecting = route.name
+                        error = null
+                        route.select()
                     }
                 }
-                routes.forEach { route ->
-                    Row(
-                        Modifier
-                            .fillMaxWidth()
-                            .clickable {
-                                connecting = route.name
-                                route.select()
-                            }
-                            .padding(vertical = 12.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Icon(Icons.Default.Tv, null)
-                        Spacer(Modifier.width(16.dp))
-                        Text(route.name, Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
-                        if (connecting == route.name) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+                others.forEach { tv ->
+                    DeviceRow(tv.name, busy = connecting == tv.name, enabled = connecting == null) {
+                        connecting = tv.name
+                        error = null
+                        scope.launch {
+                            val result = CastController.connectLan(context, tv) { lgPrompt = true }
+                            lgPrompt = false
+                            if (result == null) onDismiss() else { error = result; connecting = null }
+                        }
+                    }
+                }
+                if (lgPrompt) {
+                    Text(
+                        "Your TV is asking whether to allow this device. Choose Allow with the TV remote.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                }
+                error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium) }
+                if (scanning || (routes.isEmpty() && others.isEmpty())) {
+                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 8.dp)) {
+                        if (scanning) {
+                            CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+                            Spacer(Modifier.width(12.dp))
+                        }
+                        Text(
+                            if (scanning) "Looking for TVs on this Wi-Fi…"
+                            else "No TVs found. Check the TV is on and on the same Wi-Fi.",
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
                     }
                 }
             }
         },
         confirmButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
+}
+
+@Composable
+private fun DeviceRow(name: String, busy: Boolean, enabled: Boolean, onClick: () -> Unit) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(Icons.Default.Tv, null)
+        Spacer(Modifier.width(16.dp))
+        Text(name, Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
+        if (busy) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+    }
 }
 
 private const val LOCAL_NETWORK = "android.permission.ACCESS_LOCAL_NETWORK"

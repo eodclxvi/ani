@@ -1,39 +1,34 @@
 package com.anistream.cast
 
 import android.content.Context
-import android.net.ConnectivityManager
-import android.net.NetworkCapabilities
-import android.net.Uri
 import android.util.Log
-import com.anistream.data.StreamInfo
-import com.google.android.gms.cast.HlsSegmentFormat
-import com.google.android.gms.cast.HlsVideoSegmentFormat
-import com.google.android.gms.cast.MediaInfo
-import com.google.android.gms.cast.MediaLoadRequestData
-import com.google.android.gms.cast.MediaMetadata
-import com.google.android.gms.cast.MediaTrack
 import com.google.android.gms.cast.framework.CastContext
 import com.google.android.gms.cast.framework.CastSession
 import com.google.android.gms.cast.framework.SessionManagerListener
-import com.google.android.gms.cast.framework.media.RemoteMediaClient
-import com.google.android.gms.common.images.WebImage
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import java.net.Inet4Address
+import kotlinx.coroutines.launch
 
-/** Everything the phone app needs to know about casting: is a TV connected, and send a stream to it. */
+/** Which TV the phone is playing on (if any), whatever kind it is. */
 object CastController {
     private const val TAG = "AniCast"
-    private const val SUBTITLE_TRACK_ID = 1L
 
     private var castContext: CastContext? = null
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+
+    private val _active = MutableStateFlow<RemotePlayer?>(null)
+    /** The TV being played on, or null when not casting. */
+    val active = _active.asStateFlow()
 
     private val _device = MutableStateFlow<String?>(null)
-    /** Name of the connected Cast device, or null when not casting. */
+    /** Name of the connected TV, or null when not casting. */
     val device = _device.asStateFlow()
 
     private val _available = MutableStateFlow(false)
-    /** False on devices without Google Play services (or on the TV app), so the Cast button stays hidden. */
+    /** True in the phone app (casting to LG/DLNA TVs works even without Google Play services). */
     val available = _available.asStateFlow()
 
     val context: CastContext? get() = castContext
@@ -41,94 +36,48 @@ object CastController {
     /** Call once from the phone activity (main thread). Safe to call again. */
     @Suppress("DEPRECATION")
     fun init(context: Context) {
+        _available.value = true
         if (castContext != null) return
         castContext = try {
             CastContext.getSharedInstance(context.applicationContext)
         } catch (e: Exception) {
-            Log.w(TAG, "Cast unavailable: ${e.message}")
+            Log.w(TAG, "Google Cast unavailable: ${e.message}")
             null
         }
         val ctx = castContext ?: return
-        _available.value = true
         ctx.sessionManager.addSessionManagerListener(listener, CastSession::class.java)
-        ctx.sessionManager.currentCastSession?.takeIf { it.isConnected }?.let { _device.value = it.castDevice?.friendlyName ?: "TV" }
+        ctx.sessionManager.currentCastSession?.takeIf { it.isConnected }?.let { setActive(GoogleCastPlayer(it, ctx)) }
     }
 
-    fun remote(): RemoteMediaClient? = castContext?.sessionManager?.currentCastSession?.remoteMediaClient
+    private fun setActive(player: RemotePlayer?) {
+        _active.value = player
+        _device.value = player?.name
+    }
+
+    /** Connects to an LG or DLNA TV. [onPrompt] runs while an LG TV is asking to allow the phone. */
+    suspend fun connectLan(context: Context, tv: LanTv, onPrompt: () -> Unit): String? {
+        disconnect()
+        if (tv.isLg) {
+            val lg = LgTvPlayer.connect(context, tv, onPrompt)
+            lg.getOrNull()?.let { setActive(it); return null }
+            // LG's own way didn't work (switched off in the TV's settings, or pairing refused): try DLNA.
+            val dlna = tv.dlna ?: return "Couldn't connect to ${tv.name}: ${lg.exceptionOrNull()?.message}"
+            Log.i(TAG, "LG pairing failed (${lg.exceptionOrNull()?.message}), using DLNA")
+            setActive(DlnaPlayer(tv.name, dlna))
+            return null
+        }
+        val dlna = tv.dlna ?: return "${tv.name} can't play video from the phone"
+        setActive(DlnaPlayer(tv.name, dlna))
+        return null
+    }
 
     fun disconnect() {
-        castContext?.sessionManager?.endCurrentSession(true)
-    }
-
-    /** Plays [info] on the TV. Returns an error message, or null when the TV accepted it. */
-    fun load(
-        appContext: Context,
-        info: StreamInfo,
-        title: String,
-        subtitle: String,
-        posterUrl: String?,
-        startMs: Long,
-    ): String? {
-        val client = remote() ?: return "Not connected to a TV"
-        val ip = wifiAddress(appContext) ?: return "Connect the phone to the same Wi-Fi as the TV"
-        StreamProxy.start(info.referer)
-        val streamUrl = StreamProxy.url(ip, info.masterUrl.ifBlank { info.videoUrl })
-
-        val metadata = MediaMetadata(MediaMetadata.MEDIA_TYPE_TV_SHOW).apply {
-            putString(MediaMetadata.KEY_TITLE, title)
-            putString(MediaMetadata.KEY_SUBTITLE, subtitle)
-            posterUrl?.let { addImage(WebImage(Uri.parse(it))) }
+        val player = _active.value ?: return
+        setActive(null)
+        scope.launch {
+            runCatching { player.release() }
+            StreamProxy.stop()
         }
-        // The default TV player only shows WebVTT subtitles.
-        val subtitleTrack = info.subtitleUrl
-            ?.takeIf { it.substringBefore('?').lowercase().endsWith(".vtt") }
-            ?.let {
-                MediaTrack.Builder(SUBTITLE_TRACK_ID, MediaTrack.TYPE_TEXT)
-                    .setName("English")
-                    .setSubtype(MediaTrack.SUBTYPE_SUBTITLES)
-                    .setContentId(StreamProxy.url(ip, it))
-                    .setContentType("text/vtt")
-                    .setLanguage("en")
-                    .build()
-            }
-        val media = MediaInfo.Builder(streamUrl)
-            .setStreamType(MediaInfo.STREAM_TYPE_BUFFERED)
-            .setContentType("application/x-mpegurl")
-            .setHlsSegmentFormat(HlsSegmentFormat.TS)
-            .setHlsVideoSegmentFormat(HlsVideoSegmentFormat.MPEG2_TS)
-            .setMetadata(metadata)
-            .apply { subtitleTrack?.let { setMediaTracks(listOf(it)) } }
-            .build()
-        val request = MediaLoadRequestData.Builder()
-            .setMediaInfo(media)
-            .setAutoplay(true)
-            .setCurrentTime(startMs.coerceAtLeast(0))
-            .apply { if (subtitleTrack != null) setActiveTrackIds(longArrayOf(SUBTITLE_TRACK_ID)) }
-            .build()
-        client.load(request)
-        return null
-    }
-
-    /** Subtitles on or off on the TV. */
-    fun setSubtitles(on: Boolean) {
-        remote()?.setActiveMediaTracks(if (on) longArrayOf(SUBTITLE_TRACK_ID) else longArrayOf())
-    }
-
-    /** The phone's own address on Wi-Fi (not Tailscale or mobile data): the TV reaches the proxy through it. */
-    @Suppress("DEPRECATION")
-    private fun wifiAddress(context: Context): String? {
-        val cm = context.getSystemService(ConnectivityManager::class.java) ?: return null
-        for (network in cm.allNetworks) {
-            val caps = cm.getNetworkCapabilities(network) ?: continue
-            val lan = caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) ||
-                caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET)
-            if (!lan || caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN)) continue
-            val address = cm.getLinkProperties(network)?.linkAddresses
-                ?.map { it.address }
-                ?.firstOrNull { it is Inet4Address && !it.isLoopbackAddress }
-            if (address != null) return address.hostAddress
-        }
-        return null
     }
 
     private val listener = object : SessionManagerListener<CastSession> {
@@ -143,12 +92,17 @@ object CastController {
         override fun onSessionSuspended(session: CastSession, reason: Int) {}
 
         private fun connected(session: CastSession) {
-            _device.value = session.castDevice?.friendlyName ?: "TV"
+            val ctx = castContext ?: return
+            val previous = _active.value
+            if (previous != null && previous !is GoogleCastPlayer) scope.launch { runCatching { previous.release() } }
+            setActive(GoogleCastPlayer(session, ctx))
         }
 
         private fun ended() {
-            _device.value = null
-            StreamProxy.stop()
+            if (_active.value is GoogleCastPlayer) {
+                setActive(null)
+                StreamProxy.stop()
+            }
         }
     }
 }

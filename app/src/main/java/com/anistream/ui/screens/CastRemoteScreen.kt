@@ -35,6 +35,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -43,6 +44,9 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.launch
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -54,10 +58,11 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import com.anistream.cast.CastController
+import com.anistream.cast.CastItem
+import com.anistream.cast.LgTvPlayer
 import com.anistream.data.PlaybackPrefs
 import com.anistream.data.StreamInfo
 import com.anistream.viewmodel.AnimeDetailViewModel
-import com.google.android.gms.cast.MediaStatus
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 
@@ -76,6 +81,9 @@ fun CastRemoteScreen(
     val previous = episodes.getOrNull(index - 1).takeIf { index > 0 }
     val next = episodes.getOrNull(index + 1).takeIf { index >= 0 }
 
+    val player by CastController.active.collectAsState()
+    val scope = rememberCoroutineScope()
+
     var error by remember { mutableStateOf<String?>(null) }
     var playing by remember { mutableStateOf(false) }
     var buffering by remember { mutableStateOf(true) }
@@ -83,57 +91,78 @@ fun CastRemoteScreen(
     var durationMs by remember { mutableLongStateOf(0L) }
     var dragging by remember { mutableStateOf(false) }
     var dragValue by remember { mutableFloatStateOf(0f) }
+    // Finger on the slider (dragging also covers a seek waiting to be sent).
+    var sliding by remember { mutableStateOf(false) }
     var subtitlesOn by remember { mutableStateOf(true) }
+    // Bumped when the stream restarts (new episode, switch to DLNA), so "finished" is judged afresh.
+    var loadCount by remember { mutableStateOf(0) }
 
     // Send each stream to the TV (the first one, and the next/previous episodes).
-    LaunchedEffect(info) {
+    LaunchedEffect(info, player) {
         val i = info ?: return@LaunchedEffect
+        val p = player ?: return@LaunchedEffect
         val start = viewModel.resumePositionMs
         viewModel.resumePositionMs = 0L
         buffering = true
-        error = CastController.load(
-            appContext = context.applicationContext,
-            info = i,
-            title = viewModel.currentAnimeTitle,
-            subtitle = episode?.let { "Episode ${it.number}" }.orEmpty(),
-            posterUrl = viewModel.currentPosterUrl,
-            startMs = start,
+        error = null
+        error = p.load(
+            context.applicationContext,
+            CastItem(
+                info = i,
+                title = viewModel.currentAnimeTitle,
+                subtitle = episode?.let { "Episode ${it.number}" }.orEmpty(),
+                posterUrl = viewModel.currentPosterUrl,
+                startMs = start,
+            ),
         )
         subtitlesOn = true
+        loadCount++
     }
 
     // Follow the TV: position, play/pause, and on to the next episode when one ends.
-    LaunchedEffect(info) {
+    LaunchedEffect(loadCount) {
+        if (loadCount == 0) return@LaunchedEffect
         var lastSaved = 0L
         var finishedHandled = false
         var sawPlayback = false
         while (isActive) {
-            delay(500)
-            val remote = CastController.remote() ?: continue
-            val state = remote.playerState
-            playing = state == MediaStatus.PLAYER_STATE_PLAYING
-            buffering = state == MediaStatus.PLAYER_STATE_BUFFERING || state == MediaStatus.PLAYER_STATE_LOADING
-            if (playing || state == MediaStatus.PLAYER_STATE_PAUSED) sawPlayback = true
-            if (!dragging) positionMs = remote.approximateStreamPosition
-            durationMs = remote.streamDuration.coerceAtLeast(0)
+            delay(1000)
+            val p = player ?: continue
+            val status = p.status()
+            playing = status.playing
+            buffering = status.buffering
+            if (status.playing) sawPlayback = true
+            if (!dragging) positionMs = status.positionMs
+            durationMs = status.durationMs
             val now = System.currentTimeMillis()
             if (durationMs > 0 && now - lastSaved > 5_000) {
                 lastSaved = now
                 viewModel.updatePlaybackPosition(positionMs, durationMs)
             }
-            if (sawPlayback && !finishedHandled && state == MediaStatus.PLAYER_STATE_IDLE) {
-                when (remote.idleReason) {
-                    MediaStatus.IDLE_REASON_FINISHED -> {
-                        finishedHandled = true
-                        if (durationMs > 0) viewModel.updatePlaybackPosition(durationMs, durationMs)
-                        if (PlaybackPrefs.autoplayNext) next?.let { viewModel.playEpisode(it) }
-                    }
-                    MediaStatus.IDLE_REASON_ERROR -> {
-                        finishedHandled = true
-                        error = "The TV couldn't play this episode"
-                    }
+            if (sawPlayback && !finishedHandled) {
+                if (status.finished) {
+                    finishedHandled = true
+                    if (durationMs > 0) viewModel.updatePlaybackPosition(durationMs, durationMs)
+                    if (PlaybackPrefs.autoplayNext) next?.let { viewModel.playEpisode(it) }
+                } else if (status.error != null) {
+                    finishedHandled = true
+                    error = status.error
                 }
             }
+        }
+    }
+
+    // Quick taps on ±10 s add up and jump once: LG/DLNA TVs restart the video for every seek.
+    var seekJob by remember { mutableStateOf<Job?>(null) }
+    fun seekTo(ms: Long) {
+        val p = player ?: return
+        positionMs = ms.coerceIn(0, if (durationMs > 0) durationMs else Long.MAX_VALUE)
+        dragging = true
+        seekJob?.cancel()
+        seekJob = scope.launch {
+            delay(700)
+            p.seek(positionMs)
+            dragging = false
         }
     }
 
@@ -193,18 +222,13 @@ fun CastRemoteScreen(
 
                 Spacer(Modifier.height(24.dp))
                 Slider(
-                    value = if (dragging) dragValue else if (durationMs > 0) positionMs.toFloat() / durationMs else 0f,
-                    onValueChange = { dragging = true; dragValue = it },
-                    onValueChangeFinished = {
-                        val target = (dragValue * durationMs).toLong()
-                        CastController.remote()?.seek(target)
-                        positionMs = target
-                        dragging = false
-                    },
+                    value = if (sliding) dragValue else if (durationMs > 0) positionMs.toFloat() / durationMs else 0f,
+                    onValueChange = { sliding = true; dragging = true; dragValue = it },
+                    onValueChangeFinished = { sliding = false; seekTo((dragValue * durationMs).toLong()) },
                     enabled = durationMs > 0,
                 )
                 Row(Modifier.fillMaxWidth()) {
-                    val shown = if (dragging) (dragValue * durationMs).toLong() else positionMs
+                    val shown = if (sliding) (dragValue * durationMs).toLong() else positionMs
                     Text(formatTime(shown), style = MaterialTheme.typography.labelMedium)
                     Spacer(Modifier.weight(1f))
                     Text(formatTime(durationMs), style = MaterialTheme.typography.labelMedium)
@@ -219,11 +243,11 @@ fun CastRemoteScreen(
                     IconButton(onClick = { previous?.let { viewModel.playEpisode(it) } }, enabled = previous != null) {
                         Icon(Icons.Default.SkipPrevious, "Previous episode")
                     }
-                    IconButton(onClick = { CastController.remote()?.seek((positionMs - 10_000).coerceAtLeast(0)) }) {
+                    IconButton(onClick = { seekTo(positionMs - 10_000) }) {
                         Icon(Icons.Default.Replay10, "Back 10 seconds")
                     }
                     FilledIconButton(
-                        onClick = { CastController.remote()?.togglePlayback() },
+                        onClick = { val p = player; if (p != null) { val play = !playing; playing = play; scope.launch { p.setPlaying(play) } } },
                         modifier = Modifier.size(64.dp),
                     ) {
                         if (buffering && !playing) {
@@ -232,7 +256,7 @@ fun CastRemoteScreen(
                             Icon(if (playing) Icons.Default.Pause else Icons.Default.PlayArrow, if (playing) "Pause" else "Play", Modifier.size(36.dp))
                         }
                     }
-                    IconButton(onClick = { CastController.remote()?.seek(positionMs + 10_000) }) {
+                    IconButton(onClick = { seekTo(positionMs + 10_000) }) {
                         Icon(Icons.Default.Forward10, "Forward 10 seconds")
                     }
                     IconButton(onClick = { next?.let { viewModel.playEpisode(it) } }, enabled = next != null) {
@@ -242,8 +266,8 @@ fun CastRemoteScreen(
 
                 Spacer(Modifier.height(16.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    if (info?.subtitleUrl != null) {
-                        OutlinedButton(onClick = { subtitlesOn = !subtitlesOn; CastController.setSubtitles(subtitlesOn) }) {
+                    if (info?.subtitleUrl != null && player?.supportsSubtitles == true) {
+                        OutlinedButton(onClick = { subtitlesOn = !subtitlesOn; player?.setSubtitles(subtitlesOn) }) {
                             Icon(if (subtitlesOn) Icons.Default.ClosedCaption else Icons.Default.ClosedCaptionDisabled, null)
                             Spacer(Modifier.size(8.dp))
                             Text(if (subtitlesOn) "Subtitles on" else "Subtitles off")
@@ -252,6 +276,17 @@ fun CastRemoteScreen(
                     OutlinedButton(onClick = { CastController.disconnect() }) {
                         Text("Stop casting")
                     }
+                }
+                // LG TVs: if LG's own player shows nothing, play through the TV's DLNA player instead.
+                val lg = player as? LgTvPlayer
+                if (lg != null && lg.canUseDlna) {
+                    Spacer(Modifier.height(8.dp))
+                    TextButton(onClick = {
+                        scope.launch {
+                            error = lg.useDlna(context.applicationContext, positionMs)
+                            loadCount++
+                        }
+                    }) { Text("Nothing on the TV? Try DLNA instead") }
                 }
             }
         }

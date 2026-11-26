@@ -5,6 +5,8 @@
     <!-- Casting: find TVs on the Wi-Fi and let them stream through the phone (Android 17 asks first). -->
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.ACCESS_LOCAL_NETWORK" />
+    <!-- Finding LG / DLNA TVs: the SSDP "who is out there" broadcast. -->
+    <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
 
     <!-- Installable on TVs (no touchscreen) and phones alike. -->
     <uses-feature android:name="android.software.leanback" android:required="false" />
@@ -24,7 +26,7 @@
         android:label="@string/app_name"
         android:supportsRtl="true"
         android:theme="@style/Theme.AniStream"
-        android:usesCleartextTraffic="false">
+        android:usesCleartextTraffic="true">
 
         <!-- Google Cast setup (phone only; the TV app never starts it). -->
         <meta-data

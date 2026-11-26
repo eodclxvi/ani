@@ -71,6 +71,10 @@ dependencies {
     implementation("androidx.media3:media3-ui:1.6.0")
     implementation("androidx.media3:media3-session:1.6.0")
 
+    // Google Cast (Chromecast / Google TV) and the device list
+    implementation("com.google.android.gms:play-services-cast-framework:22.3.1")
+    implementation("androidx.mediarouter:mediarouter:1.8.1")
+
     // JSON serialization for watch history
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.8.1")
 

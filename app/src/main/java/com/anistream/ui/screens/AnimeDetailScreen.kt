@@ -40,6 +40,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
+import com.anistream.cast.CastButton
 import com.anistream.data.Episode
 import com.anistream.viewmodel.AnimeDetailViewModel
 
@@ -79,6 +80,7 @@ fun AnimeDetailScreen(
                 }
             },
             actions = {
+                CastButton()
                 IconButton(onClick = { viewModel.toggleFavorite() }) {
                     Icon(
                         imageVector = if (isFavorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder,

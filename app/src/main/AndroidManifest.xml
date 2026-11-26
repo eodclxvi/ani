@@ -2,6 +2,9 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Casting: find TVs on the Wi-Fi and let them stream through the phone (Android 17 asks first). -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.ACCESS_LOCAL_NETWORK" />
 
     <!-- Installable on TVs (no touchscreen) and phones alike. -->
     <uses-feature android:name="android.software.leanback" android:required="false" />
@@ -22,6 +25,11 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.AniStream"
         android:usesCleartextTraffic="false">
+
+        <!-- Google Cast setup (phone only; the TV app never starts it). -->
+        <meta-data
+            android:name="com.google.android.gms.cast.framework.OPTIONS_PROVIDER_CLASS_NAME"
+            android:value="com.anistream.cast.CastOptionsProvider" />
 
         <activity
             android:name=".MainActivity"

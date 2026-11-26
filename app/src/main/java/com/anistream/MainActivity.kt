@@ -44,6 +44,7 @@ class MainActivity : ComponentActivity() {
             return
         }
         ThemePreference.load(this)
+        com.anistream.cast.CastController.init(this)
         enableEdgeToEdge()
 
         setContent {
